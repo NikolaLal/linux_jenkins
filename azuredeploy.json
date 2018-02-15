@@ -2,236 +2,238 @@
   "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "storageAccountPrefix": {
-      "type": "string",
-      "metadata": {
-        "description": "Unique namespace for the Storage Account where the Virtual Machine's disks will be placed"
-      }
-    },
-    "virtualNetworkName": {
-      "type": "string",
-      "defaultValue": "myVNET",
-      "metadata": {
-        "description": "Name of the virtual network provisioned for the cluster"
-      }
-    },
     "adminUsername": {
       "type": "string",
       "metadata": {
-        "description": "Administrator user name used when provisioning virtual machines"
+        "description": "User name for the Virtual Machine."
       }
     },
     "adminPassword": {
       "type": "securestring",
       "metadata": {
-        "description": "Administrator password used when provisioning virtual machines"
+        "description": "Password for the Virtual Machine."
       }
     },
-    "dnsName": {
+    "jenkinsDnsPrefix": {
       "type": "string",
       "metadata": {
-        "description": "Domain name for the publicly accessible Jenkins master node"
+        "description": "Unique DNS Name for the Public IP used to access the Jenkins Virtual Machine."
       }
     },
-    "masterVmSize": {
+    "jenkinsReleaseType": {
       "type": "string",
-      "defaultValue": "Standard_D3",
       "allowedValues": [
-        "Standard_D3",
-        "Standard_D4"
+        "LTS",
+        "weekly",
+        "verified"
       ],
+      "defaultValue": "LTS",
       "metadata": {
-        "description": "The size of the virtual machines used when provisioning the Jenkins master node"
-      }
-    },
-    "slaveNodes": {
-      "type": "int",
-      "defaultValue": 1,
-      "metadata": {
-        "description": "Number of Jenkins slave node (1 is the default)"
-      }
-    },
-    "slaveVmSize": {
-      "type": "string",
-      "defaultValue": "Standard_D3",
-      "allowedValues": [
-        "Standard_D3",
-        "Standard_D4"
-      ],
-      "metadata": {
-        "description": "The size of the virtual machines used when provisioning Jenkins slave node(s)"
+        "description": "The Jenkins release type"
       }
     }
   },
   "variables": {
-    "templateBaseUrl": "https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/jenkins-on-ubuntu/",
-    "sharedTemplateUrl": "[concat(variables('templateBaseUrl'), 'shared-resources.json')]",
-    "jenkMasterTemplateUrl": "[concat(variables('templateBaseUrl'), 'jenkmaster-resources.json')]",
-    "jenkSlaveTemplateUrl": "[concat(variables('templateBaseUrl'), 'jenkslave-resources.json')]",
-    "namespace": "jenk",
-    "networkSettings": {
-      "virtualNetworkName": "[parameters('virtualNetworkName')]",
-      "addressPrefix": "10.0.0.0/16",
-      "subnet": {
-        "dse": {
-          "name": "dse",
-          "prefix": "10.0.0.0/24",
-          "vnet": "[parameters('virtualNetworkName')]"
-        }
-      },
-      "statics": {
-        "clusterRange": {
-          "base": "10.0.0.",
-          "start": 5
-        },
-        "jenkMaster": "10.0.0.240"
-      }
-    },
-    "masterOsSettings": {
-      "imageReference": {
-        "publisher": "Canonical",
-        "offer": "UbuntuServer",
-        "sku": "14.04.4-LTS",
-        "version": "latest"
-      },
-      "scripts": [
-        "https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/jenkins-on-ubuntu/jenkMstrInstall.sh",
-        "https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/jenkins-on-ubuntu/jenkAddNode.groovy"
-      ]
-    },
-    "slaveOsSettings": {
-      "imageReference": {
-        "publisher": "Canonical",
-        "offer": "UbuntuServer",
-        "sku": "14.04.4-LTS",
-        "version": "latest"
-      },
-      "scripts": [
-        "https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/jenkins-on-ubuntu/jenkSlaveInstall.sh"
-      ]
-    },
-    "sharedStorageAccountName": "[parameters('storageAccountPrefix')]"
+    "resourcePrefix": "jenkins",
+    "OSDiskName": "[concat(variables('resourcePrefix'), 'OSDisk')]",
+    "nicName": "[concat(variables('resourcePrefix'), 'VMNic')]",
+    "subnetName": "[concat(variables('resourcePrefix'), 'Subnet')]",
+    "publicIPAddressName": "[concat(variables('resourcePrefix'), 'PublicIP')]",
+    "vmName": "[concat(variables('resourcePrefix'), 'VM')]",
+    "vmExtensionName": "[concat(variables('resourcePrefix'), 'Init')]",
+    "virtualNetworkName": "[concat(variables('resourcePrefix'), 'VNET')]",
+    "frontEndNSGName": "[concat(variables('resourcePrefix'), 'NSG')]",
+    "vNetAddressPrefixes": "10.0.0.0/16",
+    "sNetAddressPrefixes": "10.0.0.0/24",
+    "vmPrivateIP": "10.0.0.5",
+    "_artifactsLocation": "https://raw.githubusercontent.com/Azure/azure-devops-utils/v0.27.0/",
+    "_extensionScript": "install_jenkins.sh",
+    "_artifactsLocationSasToken": ""
   },
   "resources": [
     {
-      "name": "shared",
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2015-01-01",
+      "apiVersion": "2016-09-01",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[variables('publicIPAddressName')]",
+      "location": "[resourceGroup().location]",
       "properties": {
-        "mode": "Incremental",
-        "templateLink": {
-          "uri": "[variables('sharedTemplateUrl')]",
-          "contentVersion": "1.0.0.0"
-        },
-        "parameters": {
-          "networkSettings": {
-            "value": "[variables('networkSettings')]"
-          },
-          "storageAccountName": {
-            "value": "[variables('sharedStorageAccountName')]"
-          }
+        "publicIPAllocationMethod": "Dynamic",
+        "dnsSettings": {
+          "domainNameLabel": "[parameters('jenkinsDnsPrefix')]"
         }
       }
     },
     {
-      "name": "jenkMasterNode",
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2015-01-01",
-      "dependsOn": [
-        "[concat('Microsoft.Resources/deployments/', 'shared')]"
-      ],
-      "properties": {
-        "mode": "Incremental",
-        "templateLink": {
-          "uri": "[variables('jenkMasterTemplateUrl')]",
-          "contentVersion": "1.0.0.0"
-        },
-        "parameters": {
-          "storageAccountName": {
-            "value": "[variables('sharedStorageAccountName')]"
-          },
-          "adminUsername": {
-            "value": "[parameters('adminUsername')]"
-          },
-          "adminPassword": {
-            "value": "[parameters('adminPassword')]"
-          },
-          "namespace": {
-            "value": "[variables('namespace')]"
-          },
-          "vmbasename": {
-            "value": "Master"
-          },
-          "subnet": {
-            "value": "[variables('networkSettings').subnet.dse]"
-          },
-          "dnsname": {
-            "value": "[parameters('dnsName')]"
-          },
-          "staticIp": {
-            "value": "[variables('networkSettings').statics.jenkMaster]"
-          },
-          "vmSize": {
-            "value": "[parameters('masterVmSize')]"
-          },
-          "slaveNodes": {
-            "value": "[parameters('slaveNodes')]"
-          },
-          "osSettings": {
-            "value": "[variables('masterOsSettings')]"
-          }
-        }
-      }
-    },
-    {
-      "name": "[concat('jenkSlaveNode', copyindex())]",
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2015-01-01",
-      "dependsOn": [
-        "[concat('Microsoft.Resources/deployments/', 'shared')]",
-        "[concat('Microsoft.Resources/deployments/', 'jenkMasterNode')]"
-      ],
-      "copy": {
-        "name": "vmLoop",
-        "count": "[parameters('slaveNodes')]"
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[variables('frontEndNSGName')]",
+      "location": "[resourceGroup().location]",
+      "tags": {
+        "displayName": "NSG - Front End"
       },
       "properties": {
-        "mode": "Incremental",
-        "templateLink": {
-          "uri": "[variables('jenkSlaveTemplateUrl')]",
-          "contentVersion": "1.0.0.0"
+        "securityRules": [
+          {
+            "name": "ssh-rule",
+            "properties": {
+              "description": "Allow SSH",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "22",
+              "sourceAddressPrefix": "Internet",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 100,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "http-rule",
+            "properties": {
+              "description": "Allow HTTP",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "80",
+              "sourceAddressPrefix": "Internet",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 101,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2016-09-01",
+      "type": "Microsoft.Network/virtualNetworks",
+      "name": "[variables('virtualNetworkName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('vNetAddressPrefixes')]"
+          ]
         },
-        "parameters": {
-          "storageAccountName": {
-            "value": "[variables('sharedStorageAccountName')]"
+        "subnets": [
+          {
+            "name": "[variables('subnetName')]",
+            "properties": {
+              "addressPrefix": "[variables('sNetAddressPrefixes')]",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('frontEndNSGName'))]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[concat('Microsoft.Network/networkSecurityGroups/', variables('frontEndNSGName'))]"
+      ]
+    },
+    {
+      "apiVersion": "2016-09-01",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[variables('nicName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('virtualNetworkName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIpAddress": "[variables('vmPrivateIP')]",
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]"
+              },
+              "subnet": {
+                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', variables('virtualNetworkName')),'/subnets/',variables('subnetName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2017-03-30",
+      "type": "Microsoft.Compute/virtualMachines",
+      "name": "[variables('vmName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+      ],
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "Standard_D2_v2"
+        },
+        "osProfile": {
+          "computerName": "[variables('vmName')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04-LTS",
+            "version": "latest"
           },
-          "adminUsername": {
-            "value": "[parameters('adminUsername')]"
-          },
-          "adminPassword": {
-            "value": "[parameters('adminPassword')]"
-          },
-          "namespace": {
-            "value": "[variables('namespace')]"
-          },
-          "vmbasename": {
-            "value": "[concat('Slave', copyindex())]"
-          },
-          "masterNode": {
-            "value": "[variables('networkSettings').statics.jenkMaster]"
-          },
-          "subnet": {
-            "value": "[variables('networkSettings').subnet.dse]"
-          },
-          "vmSize": {
-            "value": "[parameters('slaveVmSize')]"
-          },
-          "osSettings": {
-            "value": "[variables('slaveOsSettings')]"
+          "osDisk": {
+            "name": "osdisk",
+            "caching": "ReadWrite",
+            "createOption": "FromImage",
+            "managedDisk":{
+              "storageAccountType": "Standard_LRS"
+            }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+            }
+          ]
+        }
+      },
+      "resources": [
+        {
+          "type": "extensions",
+          "name": "[variables('vmExtensionName')]",
+          "apiVersion": "2015-06-15",
+          "location": "[resourceGroup().location]",
+          "dependsOn": [
+            "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+          ],
+          "properties": {
+            "publisher": "Microsoft.Azure.Extensions",
+            "type": "CustomScript",
+            "typeHandlerVersion": "2.0",
+            "autoUpgradeMinorVersion": true,
+            "settings": {
+              "fileUris": [
+                "[concat(variables('_artifactsLocation'), '/jenkins/', variables('_extensionScript'), variables('_artifactsLocationSasToken'))]"
+              ]
+            },
+            "protectedSettings": {
+              "commandToExecute": "[concat('./' , variables('_extensionScript'), ' -jf \"', reference(variables('publicIPAddressName')).dnsSettings.fqdn, '\" -pi \"', variables('vmPrivateIP'), '\" -al \"', variables('_artifactsLocation'), '\" -st \"', variables('_artifactsLocationSasToken'), '\" -jrt \"', parameters('jenkinsReleaseType'), '\"' )]"
+            }
           }
         }
-      }
+      ]
     }
   ],
-  "outputs": {}
+  "outputs": {
+    "jenkinsURL": {
+      "type": "string",
+      "value": "[concat('http://', reference(variables('publicIPAddressName')).dnsSettings.fqdn)]"
+    },
+    "SSH": {
+      "type": "string",
+      "value": "[concat('ssh -L 8080:localhost:8080 ', parameters('adminUsername'), '@', reference(variables('publicIPAddressName')).dnsSettings.fqdn)]"
+    }
+  }
 }
