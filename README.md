@@ -1,1 +1,1 @@
-Jenkins Master and Slave VM-s
+Jenkins VM
